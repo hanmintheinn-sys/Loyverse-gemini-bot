@@ -13,13 +13,24 @@ const PORT = process.env.PORT || 3000;
 const LOYVERSE_TOKEN = process.env.LOYVERSE_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Server Health Check နှင့် Token များ ရှိ/မရှိ စစ်ဆေးခြင်း
+// Server Health Check
 app.get("/", (req, res) => {
   res.json({
     status: "online",
     loyverseTokenLoaded: Boolean(LOYVERSE_TOKEN),
     geminiKeyLoaded: Boolean(GEMINI_API_KEY),
   });
+});
+
+// သင့် Key ဖြင့် အသုံးပြုနိုင်သော Model စာရင်းများကို ကြည့်ရှုသည့် Endpoint
+app.get("/api/models", async (req, res) => {
+  try {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 async function fetchLoyverseData() {
@@ -82,13 +93,6 @@ app.post("/api/chat", async (req, res) => {
     return res.status(400).json({ error: "Message is required." });
   }
 
-  if (!GEMINI_API_KEY) {
-    return res.status(500).json({ error: "GEMINI_API_KEY is not set in Render Environment Variables." });
-  }
-  if (!LOYVERSE_TOKEN) {
-    return res.status(500).json({ error: "LOYVERSE_TOKEN is not set in Render Environment Variables." });
-  }
-
   try {
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     const systemInstruction = `
@@ -99,7 +103,7 @@ app.post("/api/chat", async (req, res) => {
 `;
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.0-flash",
       systemInstruction,
       tools: [checkStockTool],
     });
