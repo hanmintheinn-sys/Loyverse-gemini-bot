@@ -12,13 +12,11 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const LOYVERSE_TOKEN = process.env.LOYVERSE_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; // Telegram Token ထည့်ရန်
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 
-// Customer စကားဝိုင်းမှတ်ဉာဏ်နှင့် အော်ဒါစာရင်း သိမ်းဆည်းရန်
 const chatSessions = new Map();
 const ordersList = [];
 
-// Loyverse POS မှ ပစ္စည်းနှင့် လက်ကျန်စာရင်း တိုက်ရိုက်ဆွဲယူခြင်း
 async function fetchLoyverseData() {
   const headers = {
     Authorization: `Bearer ${LOYVERSE_TOKEN}`,
@@ -31,9 +29,7 @@ async function fetchLoyverseData() {
       fetch("https://api.loyverse.com/v1.0/inventory", { headers }),
     ]);
 
-    if (!itemsRes.ok) {
-      throw new Error(`Loyverse API Error: ${itemsRes.status}`);
-    }
+    if (!itemsRes.ok) return [];
 
     const itemsData = await itemsRes.json();
     let inventory = [];
@@ -71,14 +67,11 @@ async function fetchLoyverseData() {
   }
 }
 
-// Gemini REST API ကို ခေါ်ယူခြင်း (Auto-Retry ပါဝင်သည်)
 async function callGeminiAPI(systemText, contents, maxRetries = 3) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`;
 
   const payload = {
-    systemInstruction: {
-      parts: [{ text: systemText }],
-    },
+    systemInstruction: { parts: [{ text: systemText }] },
     contents: contents,
   };
 
@@ -90,7 +83,6 @@ async function callGeminiAPI(systemText, contents, maxRetries = 3) {
     });
 
     const data = await response.json();
-
     if (response.ok) {
       return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
     }
@@ -102,12 +94,10 @@ async function callGeminiAPI(systemText, contents, maxRetries = 3) {
       await new Promise((r) => setTimeout(r, 2000 * attempt));
       continue;
     }
-
     throw new Error(`[${response.status}] ${errMsg}`);
   }
 }
 
-// AI Logic ကို အဓိက လုပ်ဆောင်ပေးသော Core Function
 async function processAiChat(userId, message) {
   const storeItems = await fetchLoyverseData();
   const inventoryText =
@@ -123,19 +113,16 @@ async function processAiChat(userId, message) {
 ၂။ စကားပြောရာတွင် အလွန်ယဉ်ကျေးချိုသာစွာဖြင့် "ပါတယ်ရှင့်"၊ "ပါမယ်ရှင့်"၊ "ဟုတ်တယ်ရှင့်"၊ "ဟုတ်ကဲ့ရှင့်"၊ "ကျေးဇူးပါရှင့်" စသည့် အသုံးအနှုန်းများကို သဘာဝကျကျ အသုံးပြုပါ။
 ၃။ အောက်တွင် ပေးထားသော [လက်ရှိ Loyverse POS ပစ္စည်းစာရင်း] ကိုသာ အခြေခံ၍ ဈေးနှုန်းနှင့် လက်ကျန် (in_stock) ကို တိကျစွာ ဖြေကြားပါ။ စာရင်းထဲမပါသော ပစ္စည်းများကို မရှိကြောင်း ယဉ်ကျေးစွာ ပြောပါ။
 ၄။ Customer က ပစ္စည်းဝယ်ယူလိုကြောင်း (အော်ဒါတင်လိုကြောင်း) ပြောပါက အော်ဒါမှတ်ရန်အတွက် (၁) အမည်၊ (၂) ဖုန်းနံပါတ်၊ (၃) ပို့ဆောင်ရမည့် လိပ်စာ နှင့် (၄) ဝယ်ယူမည့် ပစ္စည်းအရေအတွက် တို့ကို ယဉ်ကျေးစွာ တောင်းခံပါ။
-၅။ Customer ထံမှ အမည်၊ ဖုန်း၊ လိပ်စာနှင့် ဝယ်ယူမည့်ပစ္စည်း အချက်အလက် အားလုံး စုံလင်သွားပါက Customer ဖတ်ရှုရန် ယဉ်ကျေးသော အော်ဒါအတည်ပြုစာနှင့် ဘောင်ချာ (Order Summary List) ကို ရေးပေးပါ။ ထို့နောက် စာ၏ အောက်ဆုံးတွင် အောက်ပါ JSON format အတိအကျကို <ORDER_DATA> tag ဖြင့် တွဲထုတ်ပေးပါ (အချက်အလက် မစုံသေးပါက လုံးဝ မထုတ်ရပါ):
+၅။ Customer ထံမှ အချက်အလက် အားလုံး စုံလင်သွားပါက ယဉ်ကျေးသော ဘောင်ချာ (Order Summary List) ကို ရေးပေးပြီး အောက်ဆုံးတွင် JSON format ကို ထုတ်ပေးပါ-
 <ORDER_DATA>{"customerName":"အမည်","phone":"ဖုန်း","address":"လိပ်စာ","items":[{"name":"ပစ္စည်းအမည်","quantity":1,"unitPrice":1000}]}</ORDER_DATA>
-၆။ ဆိုင်နှင့် လုံးဝမသက်ဆိုင်သော အကြောင်းအရာများ မေးမြန်းလာပါက "မင်မင်က ဆိုင်ရဲ့ အရောင်းနဲ့ ပစ္စည်းစာရင်းလေးတွေပဲ ဖြေကြားပေးနိုင်လို့ပါရှင့်၊ ဆိုင်က ပစ္စည်းလေးတွေ သိချင်တာရှိရင် မင်မင့်ကို မေးလို့ရပါတယ်ရှင့်" ဟုသာ ယဉ်ကျေးစွာ ပြန်ဖြေပါ။
+၆။ ဆိုင်နှင့် မသက်ဆိုင်သော မေးခွန်းများကို မင်မင်က ဆိုင်ပစ္စည်းလေးတွေပဲ ဖြေပေးနိုင်ပါကြောင်း ယဉ်ကျေးစွာ ပြန်ဖြေပါ။
 
 [လက်ရှိ Loyverse POS ပစ္စည်းစာရင်း]:
 ${inventoryText}
 `;
 
   const history = chatSessions.get(userId) || [];
-  const contents = [
-    ...history,
-    { role: "user", parts: [{ text: message }] },
-  ];
+  const contents = [...history, { role: "user", parts: [{ text: message }] }];
 
   let replyText = await callGeminiAPI(systemPrompt, contents);
   let recordedOrder = null;
@@ -178,9 +165,8 @@ ${inventoryText}
   chatSessions.set(userId, history);
 
   return { reply: replyText, orderCreated: recordedOrder };
-};
+}
 
-// Express API Endpoints
 app.get("/", (req, res) => {
   res.json({
     status: "online",
@@ -208,30 +194,37 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// Telegram Bot ကို Backend ထဲတွင် တိုက်ရိုက် Start လုပ်ခြင်း
+// Telegram Bot Launch with Error Protection
 if (TELEGRAM_BOT_TOKEN) {
-  const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+  try {
+    const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
-  bot.start((ctx) => {
-    ctx.reply("မင်္ဂလာပါရှင်! မင်မင်က ဆိုင်ရဲ့ အွန်လိုင်းအရောင်းကိုယ်စားလှယ် ဖြစ်ပါတယ်ရှင့်။ သိချင်တာလေးတွေ မေးလို့ရပါတယ်ရှင့်။");
-  });
+    bot.start((ctx) => {
+      ctx.reply("မင်္ဂလာပါရှင်! မင်မင်က ဆိုင်ရဲ့ အွန်လိုင်းအရောင်းကိုယ်စားလှယ် ဖြစ်ပါတယ်ရှင့်။ သိချင်တာလေးတွေ မေးလို့ရပါတယ်ရှင့်။");
+    });
 
-  bot.on("text", async (ctx) => {
-    const userMessage = ctx.message.text;
-    const userId = `tg_${ctx.from.id}`;
+    bot.on("text", async (ctx) => {
+      const userMessage = ctx.message.text;
+      const userId = `tg_${ctx.from.id}`;
 
-    try {
-      await ctx.telegram.sendChatAction(ctx.chat.id, "typing");
-      const result = await processAiChat(userId, userMessage);
-      await ctx.reply(result.reply);
-    } catch (err) {
-      console.error("Telegram Bot Error:", err);
-      await ctx.reply("ဆာဗာနဲ့ ချိတ်ဆက်ရာမှာ အခက်အခဲ ရှိနေပါတယ်ရှင့်။ ခဏနေမှ ထပ်ကြိုးစားပေးပါရှင့်။");
-    }
-  });
+      try {
+        await ctx.telegram.sendChatAction(ctx.chat.id, "typing");
+        const result = await processAiChat(userId, userMessage);
+        await ctx.reply(result.reply);
+      } catch (err) {
+        console.error("Telegram User Chat Error:", err.message);
+        await ctx.reply("ဆာဗာနဲ့ ချိတ်ဆက်ရာမှာ အခက်အခဲ ရှိနေပါတယ်ရှင့်။");
+      }
+    });
 
-  bot.launch();
-  console.log("Telegram Bot started successfully inside backend!");
+    bot.launch().catch((err) => {
+      console.error("Telegram launch error (non-fatal):", err.message);
+    });
+
+    console.log("Telegram Bot started safely.");
+  } catch (err) {
+    console.error("Failed to initialize Telegraf:", err.message);
+  }
 }
 
 app.listen(PORT, () => {
