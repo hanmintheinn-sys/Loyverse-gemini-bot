@@ -13,7 +13,23 @@ const PORT = process.env.PORT || 3000;
 const LOYVERSE_TOKEN = process.env.LOYVERSE_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Server Health Check
+// Google Server လိုင်းကျပ်ပါက အလိုအလျောက် ပြန်စမ်းပေးမည့် Helper Function
+async function sendWithRetry(chat, content, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await chat.sendMessage(content);
+    } catch (err) {
+      const isBusy = err.message?.includes("503") || err.message?.includes("high demand") || err.message?.includes("overloaded");
+      if (isBusy && attempt < maxRetries) {
+        console.log(`Gemini server busy. Retrying (${attempt}/${maxRetries}) in 2 seconds...`);
+        await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 app.get("/", (req, res) => {
   res.json({
     status: "online",
@@ -22,7 +38,6 @@ app.get("/", (req, res) => {
   });
 });
 
-// သင့် Key ဖြင့် အသုံးပြုနိုင်သော Model စာရင်းများကို ကြည့်ရှုသည့် Endpoint
 app.get("/api/models", async (req, res) => {
   try {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${GEMINI_API_KEY}`);
@@ -109,14 +124,14 @@ app.post("/api/chat", async (req, res) => {
     });
 
     const chat = model.startChat();
-    let result = await chat.sendMessage(message);
+    let result = await sendWithRetry(chat, message);
 
     const calls = result.response.functionCalls();
     if (calls && calls.length > 0) {
       const call = calls[0];
       if (call.name === "checkStoreInventory") {
         const storeItems = await fetchLoyverseData();
-        result = await chat.sendMessage([
+        result = await sendWithRetry(chat, [
           {
             functionResponse: {
               name: "checkStoreInventory",
