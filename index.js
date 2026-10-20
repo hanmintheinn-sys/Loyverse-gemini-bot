@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 dotenv.config();
 
@@ -13,7 +13,7 @@ const PORT = process.env.PORT || 3000;
 const LOYVERSE_TOKEN = process.env.LOYVERSE_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 async function fetchLoyverseData() {
   const headers = {
@@ -50,17 +50,21 @@ async function fetchLoyverseData() {
 }
 
 const checkStockTool = {
-  name: "checkStoreInventory",
-  description: "ဆိုင်ရှိ ပစ္စည်းအမည်များ၊ ဈေးနှုန်းများနှင့် လက်ကျန် Stock အရေအတွက်ကို စစ်ဆေးပေးသည်။",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      searchQuery: {
-        type: Type.STRING,
-        description: "Customer ရှာဖွေလိုသော ပစ္စည်းအမည်",
+  functionDeclarations: [
+    {
+      name: "checkStoreInventory",
+      description: "ဆိုင်ရှိ ပစ္စည်းအမည်များ၊ ဈေးနှုန်းများနှင့် လက်ကျန် Stock အရေအတွက်ကို စစ်ဆေးပေးသည်။",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          searchQuery: {
+            type: "STRING",
+            description: "Customer ရှာဖွေလိုသော ပစ္စည်းအမည်",
+          },
+        },
       },
     },
-  },
+  ],
 };
 
 app.get("/", (req, res) => {
@@ -82,44 +86,29 @@ app.post("/api/chat", async (req, res) => {
 - အဖြေများကို မြန်မာဘာသာဖြင့် ယဉ်ကျေးသိမ်မွေ့စွာ ရှင်းလင်းစွာ ဖြေကြားပါ။
 `;
 
-    let response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: message,
-      config: {
-        systemInstruction,
-        tools: [{ functionDeclarations: [checkStockTool] }],
-      },
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      systemInstruction,
+      tools: [checkStockTool],
     });
 
-    const functionCalls = response.functionCalls;
-    if (functionCalls && functionCalls.length > 0) {
-      const call = functionCalls[0];
-      if (call.name === "checkStoreInventory") {
-        const storeItems = await fetchLoyverseData();
+    const chat = model.startChat();
+    let result = await chat.sendMessage(message);
+    const call = result.response.functionCalls()?.[0];
 
-        response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [
-            { role: "user", parts: [{ text: message }] },
-            { role: "model", parts: [{ functionCall: call }] },
-            {
-              role: "user",
-              parts: [
-                {
-                  functionResponse: {
-                    name: "checkStoreInventory",
-                    response: { items: storeItems },
-                  },
-                },
-              ],
-            },
-          ],
-          config: { systemInstruction },
-        });
-      }
+    if (call && call.name === "checkStoreInventory") {
+      const storeItems = await fetchLoyverseData();
+      result = await chat.sendMessage([
+        {
+          functionResponse: {
+            name: "checkStoreInventory",
+            response: { items: storeItems },
+          },
+        },
+      ]);
     }
 
-    res.json({ reply: response.text });
+    res.json({ reply: result.response.text() });
   } catch (error) {
     console.error("API Error:", error);
     res.status(500).json({ error: "အချက်အလက် တွက်ချက်ရာတွင် အမှားအယွင်း ဖြစ်ပေါ်နေပါသည်။" });
